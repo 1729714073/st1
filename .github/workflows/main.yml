@@ -1,48 +1,63 @@
 name: GHCR CI
 
 on:
+  # 当代码被推送到 main 分支时触发
   push:
-    branches: [main]
+    branches: [ 'main' ]
+  # 当有 Pull Request 指向 main 分支时触发
+  pull_request:
+    branches: [ 'main' ]
+  # 允许手动触发
   workflow_dispatch:
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    # 在这里为工作流授予写包（packages: write）的权限
+    # 这个权限只在受信任的事件（如 push 到 main 分支）中才会完全生效
     permissions:
       contents: read
       packages: write
 
     steps:
-    - name: lowercase repository name
-      run: echo "IMAGE_NAME=${GITHUB_REPOSITORY@L}" >> ${GITHUB_ENV}
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Read version from file
+        id: version
+        # 您的原始读取版本步骤，保持不变
+        run: echo "VERSION=$(cat version.txt | grep version= | cut -d= -f2)" >> $GITHUB_OUTPUT
 
-    - name: Read version from file
-      id: version
-      run: echo "VERSION=$(cat version.txt | grep version= | cut -d= -f2)" >> $GITHUB_OUTPUT
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-    - name: Log in to the GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Log in to the GitHub Container Registry
+        # 关键点1：只有在需要推送镜像时才登录
+        # 仅在 push 到 main 分支或手动触发时运行此步骤
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # 使用 github.repository_owner 更为健壮，它始终是仓库的所有者
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        push: true
-        tags: |
-          ghcr.io/${{ env.IMAGE_NAME }}:latest
-          ghcr.io/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        platforms: |
-          linux/amd64
-          linux/arm64
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # 关键点2：动态决定是否推送
+          # 仅在 push 到 main 分支或手动触发时，此值为 true，在 PR 时为 false
+          push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
+          # 启用缓存以提高后续构建速度
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: |
+            linux/amd64
+            linux/arm64
