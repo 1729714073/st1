@@ -1,22 +1,20 @@
 name: GHCR CI
 
 on:
-  # 当代码被推送到 main 分支时触发
   push:
     branches: [ 'main' ]
-  # 当有 Pull Request 指向 main 分支时触发
   pull_request:
     branches: [ 'main' ]
-  # 允许手动触发
+  # 允许手动触发，这是使用 PAT 测试最直接的方式
   workflow_dispatch:
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    # 在这里为工作流授予写包（packages: write）的权限
-    # 这个权限只在受信任的事件（如 push 到 main 分支）中才会完全生效
     permissions:
       contents: read
+      # 注意：当使用 PAT 时，此处的 packages: write 理论上不再是必须的，
+      # 因为 PAT 的权限是独立于工作流权限的，但保留它没有坏处。
       packages: write
 
     steps:
@@ -25,7 +23,6 @@ jobs:
 
       - name: Read version from file
         id: version
-        # 您的原始读取版本步骤，保持不变
         run: echo "VERSION=$(cat version.txt | grep version= | cut -d= -f2)" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
@@ -34,29 +31,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-- name: Log in to the GitHub Container Registry
-  if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-  uses: docker/login-action@v3
-  with:
-    registry: ghcr.io
-    username: ${{ github.repository_owner }}
-    # 将密码从 GITHUB_TOKEN 改为你的 PAT
-    password: ${{ secrets.GHCR_PAT }}
-
+      - name: Log in to the GitHub Container Registry
+        # 只有在需要推送镜像时才登录 (push到main分支或手动触发)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          # 关键修改：在这里使用您创建的 PAT Secret
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          # 关键点2：动态决定是否推送
-          # 仅在 push 到 main 分支或手动触发时，此值为 true，在 PR 时为 false
+          # 动态决定是否推送
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
-          # 启用缓存以提高后续构建速度
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: |
             linux/amd64
             linux/arm64
+
