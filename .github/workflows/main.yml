@@ -34,16 +34,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to the GitHub Container Registry
-        # 关键点1：只有在需要推送镜像时才登录
-        # 仅在 push 到 main 分支或手动触发时运行此步骤
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          # 使用 github.repository_owner 更为健壮，它始终是仓库的所有者
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+- name: Log in to the GitHub Container Registry
+  if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+  uses: docker/login-action@v3
+  with:
+    registry: ghcr.io
+    username: ${{ github.repository_owner }}
+    # 将密码从 GITHUB_TOKEN 改为你的 PAT
+    password: ${{ secrets.GHCR_PAT }}
+
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
